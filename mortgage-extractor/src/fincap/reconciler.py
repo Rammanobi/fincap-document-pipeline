@@ -46,7 +46,7 @@ def reconcile(extraction: dict) -> list[ReconciliationResult]:
                 description=description,
                 formula=formula,
                 status="skipped",
-                note=f"Missing or invalid field(s): {', '.join(missing_fields)}"
+                note=f"Cannot verify: field {', '.join(missing_fields)} is missing or null"
             ))
             continue
             

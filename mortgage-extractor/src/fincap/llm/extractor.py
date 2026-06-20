@@ -1,5 +1,5 @@
 import json
-from .client import get_client
+from .client import get_client, retry_with_backoff
 from ..config import settings
 
 def extract_fields(page_text: str) -> dict:
@@ -30,6 +30,26 @@ def extract_fields(page_text: str) -> dict:
         "   - government_fees + prepaids = total_other_costs\n"
         "   - total_loan_costs + total_other_costs = total_closing_costs\n"
         "   For appraisals: loan_amount / appraised_value = ltv_revised (as a percentage)\n\n"
+        "CRITICAL COMPLETENESS RULES — these prevent missing embedded values:\n\n"
+        "A. EXTRACT VALUES EMBEDDED INSIDE SENTENCES, NOT JUST LABELED ROWS.\n"
+        "Monetary values and percentages do not always appear as a clean \"Label: $value\" row. They are often embedded inside descriptive sentences, parentheses, or notes. You MUST extract these too. Examples of embedded values you must capture:\n"
+        "  - \"Original LTV (at $845,000.00 value, $680,000.00 loan): 80.47%\" → extract loan_amount = 680000.00 AND appraised_value reference AND ltv_original = 80.47\n"
+        "  - \"Revised LTV (at $798,000.00 value, $680,000.00 loan): 85.2%\" → the $680,000.00 loan figure is the loan_amount\n"
+        "  - \"Adjustment basis: -$25,500.00 (deferred maintenance)\" → extract adjustment_amount = -25500.00\n"
+        "When the same value (like loan_amount) appears inside multiple sentences, extract it once with the page where it is clearest.\n\n"
+        "B. SCAN FOR EVERY MONETARY VALUE AND PERCENTAGE IN THE ENTIRE DOCUMENT.\n"
+        "Before finishing, re-read the full document text and confirm that EVERY dollar amount, EVERY percentage, and EVERY numeric identifier you can see has been mapped to a field. If you find a monetary value or percentage that you have not yet placed into a field, create an appropriately named field for it rather than dropping it. Never silently skip a number that appears in the text.\n\n"
+        "C. MORTGAGE DOMAIN KNOWLEDGE — values are frequently embedded in these locations:\n"
+        "  - Underwriting notes (loan amount, LTV inputs)\n"
+        "  - Parenthetical explanations (adjustment basis, value breakdowns)\n"
+        "  - LTV calculation sentences (both the property value and the loan amount are stated inside the LTV line)\n"
+        "  - Footnotes and correction notices (the revised value lives in the sentence, not a row)\n"
+        "  - Escrow and insurance reference blocks\n"
+        "Always check these locations for embedded monetary values.\n\n"
+        "D. LTV LINES CONTAIN THREE NUMBERS — extract all three.\n"
+        "A line like \"Revised LTV (at $798,000.00 value, $680,000.00 loan): 85.2%\" contains: the property/appraised value, the loan amount, and the LTV percentage. Extract the loan amount as loan_amount and the percentage as the LTV field. Do not extract only the percentage.\n\n"
+        "E. IF A FIELD IS NEEDED FOR A RECONCILIATION FORMULA, IT MUST BE EXTRACTED.\n"
+        "When you write a reconciliation formula that references a field (for example loan_amount / appraised_value = ltv_revised), every field named in that formula MUST exist in your fields output with a real value. Never write a formula that references a field you did not extract. If you reference loan_amount in a formula, you must also extract loan_amount as a field.\n\n"
         "OUTPUT SCHEMA — return exactly this structure:\n"
         "{\n"
         "  \"document_type\": {\n"
@@ -75,6 +95,7 @@ def extract_fields(page_text: str) -> dict:
         "--- END DOCUMENT TEXT ---"
     )
 
+    @retry_with_backoff
     def do_call(messages):
         response = client.chat.completions.create(
             model=settings.vision_model,
@@ -93,8 +114,11 @@ def extract_fields(page_text: str) -> dict:
         content = do_call(messages)
         return json.loads(content)
     except json.JSONDecodeError as e:
-        print(f"JSONDecodeError: {e}. Retrying with stricter instructions.")
+        print(f"JSONDecodeError: {e}. Raw response: {content}")
         messages.append({"role": "assistant", "content": content})
-        messages.append({"role": "user", "content": "You returned invalid JSON. Return ONLY a valid JSON object. No markdown, no preambles."})
+        messages.append({"role": "user", "content": "Your previous response was not valid JSON. Return ONLY a valid JSON object, no markdown, no commentary."})
         content2 = do_call(messages)
-        return json.loads(content2)
+        try:
+            return json.loads(content2)
+        except json.JSONDecodeError as e2:
+            raise ValueError(f"Failed to parse JSON after retry. Raw response: {content2}") from e2
