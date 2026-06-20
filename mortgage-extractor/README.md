@@ -8,12 +8,14 @@ An intelligent, 3-phase pipeline for extracting structured financial data from m
   - Validates the PDF structure.
   - Renders pages as high-quality 200 DPI images.
   - Transcribes text using OpenAI's `gpt-4o` Vision model, capturing complex layouts, footnotes, and stamps.
+  - **Robust Error Handling:** Features exponential backoff and jitter for resilient API interactions during rate limits.
   
 - **Phase 2: LLM Data Extraction**
   - Extracts targeted fields using `gpt-4o` forced to output structured JSON.
   - Intelligently detects and applies corrections from underwriting notes or revision stamps.
   - Extracts fields reliably even when embedded within complex sentences.
   - Flags degraded text regions and identifies reconciliation formulas for validation.
+  - **Comprehensive Extraction:** Enforces strict rules to capture embedded monetary values (e.g., LTV inputs) deep within underwriting paragraphs.
 
 - **Phase 3: Deterministic Reconciliation & Audit Assembly**
   - **Zero LLM usage:** Uses deterministic Python `decimal.Decimal` arithmetic to verify financial formulas.
@@ -78,8 +80,8 @@ uv run fincap extract fixtures/appraisal_doc.pdf
 
 ## Outputs
 
-After execution, the pipeline creates an `outputs/` folder containing three key files:
+After execution, the pipeline creates a dedicated per-document folder under `outputs/` (e.g., `outputs/<document_name>/`) containing three key files. If a folder for that document already exists, subsequent runs will safely append a timestamp to the folder name to preserve all historical data.
 
-1. **`outputs/page_text.txt`**: The combined transcription from the Vision LLM (Phase 1).
-2. **`outputs/extraction.json`**: The raw structured JSON extraction directly from the LLM (Phase 2).
-3. **`outputs/assignment.json`**: The final verified, mathematically reconciled, and audited deliverable (Phase 3). This is the primary output containing confidence intervals, review flags, and the audit trail.
+1. **`outputs/<document_name>/page_text.txt`**: The combined transcription from the Vision LLM (Phase 1).
+2. **`outputs/<document_name>/extraction.json`**: The raw structured JSON extraction directly from the LLM (Phase 2).
+3. **`outputs/<document_name>/assignment.json`**: The final verified, mathematically reconciled, and audited deliverable (Phase 3). This is the primary output containing confidence intervals, review flags, and the audit trail.
