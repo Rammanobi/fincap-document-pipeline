@@ -41,29 +41,65 @@ Whether dealing with loan estimates, complex appraisal documents, or documents w
 ## 🏗️ Architecture
 
 ```mermaid
-graph TD
-    A[Raw PDF Document] -->|PyMuPDF| B(Rendered PNG Images)
+flowchart TD
+    %% Define Styles
+    classDef inputStyle fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#000
+    classDef outputStyle fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#000
+    classDef processStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef llmStyle fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px,color:#000
+
+    %% Input
+    Input[PDF Document]:::inputStyle
     
-    subgraph Phase 1: Perception
-    B -->|GPT-4o Vision| C[page_text.txt]
+    %% Main CLI Orchestrator
+    subgraph Pipeline ["Mortgage Extractor Pipeline"]
+        direction TB
+
+        %% Phase 1
+        subgraph Phase1 ["Phase 1: Perception (Ingestion & Transcription)"]
+            direction TB
+            Validator[Validator]:::processStyle
+            Renderer[Renderer]:::processStyle
+            VisionLLM((Vision Reader\ngpt-4o)):::llmStyle
+            PageText[page_text.txt]:::outputStyle
+            
+            Validator --> Renderer --> VisionLLM --> PageText
+        end
+
+        %% Phase 2
+        subgraph Phase2 ["Phase 2: Cognition (LLM Extraction)"]
+            direction TB
+            ExtractorLLM((Extractor\ngpt-4o)):::llmStyle
+            ExtractionOutput[extraction.json]:::outputStyle
+            
+            PageText --> ExtractorLLM --> ExtractionOutput
+        end
+
+        %% Phase 3
+        subgraph Phase3 ["Phase 3: Verification (Reconciliation & Assembly)"]
+            direction TB
+            
+            %% Split the flow visually into two clean columns
+            MathChecker[1. Reconciler\nMath Checker]:::processStyle
+            ReviewBuilder[2. Review Builder\nHuman Flags]:::processStyle
+            
+            AuditTrail[3. Audit Trail\nIndependent History]:::processStyle
+            Assembler[4. Assembler\nPackage Data]:::processStyle
+            
+            %% Math & Review flow (Left side)
+            ExtractionOutput --> MathChecker --> ReviewBuilder --> Assembler
+            
+            %% Audit Trail flow (Right side, parallel)
+            ExtractionOutput --> AuditTrail --> Assembler
+        end
     end
-    
-    subgraph Phase 2: Cognition
-    C -->|GPT-4o JSON Mode| D[extraction.json]
-    end
-    
-    subgraph Phase 3: Verification
-    D --> E{Python Math}
-    E -->|Formula Check| F[Reconciliation Flags]
-    D --> G{Review Logic}
-    G -->|Confidence Check| H[Review Signals]
-    D --> I[Audit Trail]
-    F --> J[assignment.json]
-    H --> J
-    I --> J
-    end
-    
-    J --> K((Final Validated Output))
+
+    %% Final Output
+    FinalOutput[outputs/doc_name/assignment.json]:::outputStyle
+
+    %% Connections
+    Input --> Validator
+    Assembler --> FinalOutput
 ```
 
 ---
@@ -139,8 +175,8 @@ fincap-document-pipeline/
 
 ## 📊 Output Artifacts
 
-Running the pipeline populates the `outputs/` directory with three key artifacts:
+Running the pipeline creates a dedicated per-document folder under `outputs/` (e.g., `outputs/<document_name>/`) containing three key artifacts. If a folder for that document already exists, subsequent runs will safely append a timestamp to the folder name to preserve historical data.
 
-1. 📄 **`page_text.txt`**: The combined transcription from the Vision LLM (Phase 1).
-2. 🧱 **`extraction.json`**: The raw structured JSON extraction (Phase 2).
-3. 🎯 **`assignment.json`**: The final, mathematically reconciled, and audited deliverable. **This is the primary output** containing confidence intervals, review flags, and the audit trail.
+1. 📄 **`outputs/<document_name>/page_text.txt`**: The combined transcription from the Vision LLM (Phase 1).
+2. 🧱 **`outputs/<document_name>/extraction.json`**: The raw structured JSON extraction (Phase 2).
+3. 🎯 **`outputs/<document_name>/assignment.json`**: The final, mathematically reconciled, and audited deliverable. **This is the primary output** containing confidence intervals, review flags, and the audit trail.
